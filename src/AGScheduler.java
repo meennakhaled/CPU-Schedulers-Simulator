@@ -4,9 +4,8 @@ public class AGScheduler implements scheduler2 {
 
     private Map<Process, Integer> remainingQuantum = new HashMap<>();
 
-
-    public SchedulerResult schedule(List<Process> input, int contextSwitch)
-    {
+    @Override
+    public SchedulerResult schedule(List<Process> input, int contextSwitch) {
 
         List<Process> processes = Process.copyList(input);
         Queue<Process> readyQueue = new LinkedList<>();
@@ -17,7 +16,7 @@ public class AGScheduler implements scheduler2 {
         Process current = null;
         boolean forceSwitch = false;
 
-        // init
+        // init remaining quantum
         for (Process p : processes) {
             remainingQuantum.put(p, p.getInitialQuantum());
         }
@@ -38,7 +37,6 @@ public class AGScheduler implements scheduler2 {
             }
 
             executionOrder.add(current.getName());
-
             int rq = remainingQuantum.get(current);
 
             // ================== FCFS (25%) ==================
@@ -58,10 +56,13 @@ public class AGScheduler implements scheduler2 {
                 continue;
             }
 
-            // ================== PRIORITY ==================
-            Process highestPriority = getMostPriority(processes, time);
+            // ================== PRIORITY (preemptive) ==================
+            Process highestPriority = getMostPriority(readyQueue, current);
 
             if (highestPriority != null && highestPriority != current) {
+
+                // context switch
+                time += contextSwitch;
 
                 int bonus = (int) Math.ceil(rq / 2.0);
                 current.setCurrentQuantum(current.getCurrentQuantum() + bonus);
@@ -76,7 +77,7 @@ public class AGScheduler implements scheduler2 {
                 continue;
             }
 
-            // execute another 25%
+            // ================== second 25% ==================
             exe = Math.min(slice, current.getRemainingBurstTime());
             current.execute(exe);
             time += exe;
@@ -91,11 +92,15 @@ public class AGScheduler implements scheduler2 {
                 continue;
             }
 
-            // ================== SJF ==================
-            Process shortest = getShortest(processes, time);
+            // ================== SJF (preemptive) ==================
+            Process shortest = getShortest(readyQueue);
 
-            if (shortest != current &&
+            if (shortest != null &&
+                    shortest != current &&
                     shortest.getRemainingBurstTime() < current.getRemainingBurstTime()) {
+
+                // context switch
+                time += contextSwitch;
 
                 current.setCurrentQuantum(current.getCurrentQuantum() + rq);
                 current.logQuantumUpdate();
@@ -109,7 +114,7 @@ public class AGScheduler implements scheduler2 {
                 continue;
             }
 
-            // run remaining quantum
+            // ================== run remaining quantum ==================
             exe = Math.min(rq, current.getRemainingBurstTime());
             current.execute(exe);
             time += exe;
@@ -125,6 +130,8 @@ public class AGScheduler implements scheduler2 {
             }
 
             // ================== QUANTUM EXHAUSTED ==================
+            time += contextSwitch;
+
             current.setCurrentQuantum(current.getCurrentQuantum() + 2);
             current.logQuantumUpdate();
             remainingQuantum.put(current, current.getCurrentQuantum());
@@ -169,35 +176,40 @@ public class AGScheduler implements scheduler2 {
                     !p.isCompleted() &&
                     p != running &&
                     !q.contains(p)) {
+
+                // Aging to prevent starvation
+                p.setDynamicPriority(
+                        Math.max(0, p.getDynamicPriority() - 1)
+                );
+
                 q.add(p);
             }
         }
     }
 
-    private Process getMostPriority(List<Process> all, int time) {
-        Process best = null;
-        for (Process p : all) {
-            if (p.getArrivalTime() <= time && !p.isCompleted()) {
-                if (best == null ||
-                        p.getDynamicPriority() < best.getDynamicPriority()) {
-                    best = p;
-                }
+    // ===== Priority from ready queue only =====
+    private Process getMostPriority(Queue<Process> readyQueue, Process current) {
+        Process best = current;
+
+        for (Process p : readyQueue) {
+            if (best == null ||
+                    p.getDynamicPriority() < best.getDynamicPriority()) {
+                best = p;
             }
         }
         return best;
     }
 
-    private Process getShortest(List<Process> all, int time) {
+    // ===== SJF helper with FCFS tie-break =====
+    private Process getShortest(Queue<Process> readyQueue) {
         Process best = null;
-        for (Process p : all) {
-            if (p.getArrivalTime() <= time && !p.isCompleted()) {
-                if (best == null ||
-                        p.getRemainingBurstTime() < best.getRemainingBurstTime()) {
-                    best = p;
-                }
+
+        for (Process p : readyQueue) {
+            if (best == null ||
+                    p.getRemainingBurstTime() < best.getRemainingBurstTime()) {
+                best = p;
             }
         }
         return best;
     }
-
 }

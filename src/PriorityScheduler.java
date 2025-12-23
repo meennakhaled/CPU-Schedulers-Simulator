@@ -1,53 +1,72 @@
 import java.util.*;
 
-class PriorityScheduler extends Scheduler {
+public class PriorityScheduler extends Scheduler {
 
-    public PriorityScheduler(List<Process> processes, int contextSwitchTime) {
+    private int agingInterval;
+
+    public PriorityScheduler(List<Process> processes,
+                             int contextSwitchTime,
+                             int agingInterval) {
         super(processes, contextSwitchTime);
+        this.agingInterval = agingInterval;
     }
 
     @Override
     public SchedulerResult schedule() {
+
         int currentTime = 0;
+        Process current = null;
+        int lastAgingTime = 0;
 
         while (!allProcessesCompleted()) {
-            List<Process> arrivedProcesses = getArrivedProcesses(currentTime);
 
-            if (arrivedProcesses.isEmpty()) {
-                currentTime = getNextArrivalTime(currentTime);
+            List<Process> ready = getArrivedProcesses(currentTime);
+
+            if (ready.isEmpty()) {
+                currentTime++;
                 continue;
             }
 
-            // Select process with highest priority (lowest priority number)
-            Process selectedProcess = arrivedProcesses.stream()
-                    .min(Comparator.comparingInt(Process::getPriority)
+            // ===== Aging =====
+            if (currentTime - lastAgingTime >= agingInterval) {
+                for (Process p : ready) {
+                    if (p != current && !p.isCompleted()) {
+                        p.setPriority(Math.max(0, p.getPriority() - 1));
+                    }
+                }
+                lastAgingTime = currentTime;
+            }
+
+            // ===== Select =====
+            Process selected = ready.stream()
+                    .min(Comparator
+                            .comparingInt(Process::getPriority)
                             .thenComparingInt(Process::getArrivalTime))
                     .orElse(null);
 
-            if (selectedProcess == null)
-                break;
+            if (selected == null) {
+                currentTime++;
+                continue;
+            }
 
-            // Apply context switch
-            currentTime = performContextSwitch(currentTime, selectedProcess.getName());
+            // ===== Context Switch =====
+            if (current != selected) {
+                currentTime = performContextSwitch(currentTime, selected.getName());
+                addToExecutionOrder(selected.getName());
+                current = selected;
 
-            // Add to execution order
-            addToExecutionOrder(selectedProcess.getName());
+                if (current.getStartTime() == -1) {
+                    current.setStartTime(currentTime);
+                }
+            }
 
-            // Set start time
-            selectedProcess.setStartTime(currentTime);
+            // ===== Execute =====
+            current.execute(1);
+            currentTime++;
 
-            // Find next event time
-            int nextEventTime = getNextArrivalTime(currentTime);
-            int timeToComplete = selectedProcess.getRemainingTime();
-            int executionTime = Math.min(timeToComplete, nextEventTime - currentTime);
-
-            // Execute process
-            selectedProcess.execute(executionTime);
-            currentTime += executionTime;
-
-            // Set completion time if done
-            if (selectedProcess.isCompleted()) {
-                selectedProcess.setCompletionTime(currentTime);
+            if (current.isCompleted()) {
+                current.setCompletionTime(currentTime);
+                current = null;
             }
         }
 
